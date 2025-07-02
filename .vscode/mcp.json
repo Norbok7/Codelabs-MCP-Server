@@ -1,0 +1,23 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "openai_api_key",
+      "description": "Enter your OpenAI API Key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "codelabs-assistant": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OPENAI_API_KEY=${input:openai_api_key}",
+        "codelabs-mcp-server"
+      ]
+    }
+  }
+}
