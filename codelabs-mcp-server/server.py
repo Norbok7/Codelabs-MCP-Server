@@ -10,9 +10,11 @@ mcp = FastMCP(name="Codelabs Learning Assistant")
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    raise ValueError("The OPENAI_API_KEY environment variable is not set.")
+    # Don't raise error immediately - let the tool handle it gracefully
+    api_key = None
 
-openai.api_key = api_key
+if api_key:
+    openai.api_key = api_key
 
 # Define the instructional prompt
 INSTRUCTION_PROMPT = """
@@ -73,23 +75,51 @@ def extract_relevant_lessons(question: str, max_snippets: int = 3) -> str:
 @mcp.tool(name="answer_question", description="Answer student questions with guidance-focused responses.")
 async def answer_question(question: str) -> str:
     """Processes a student's question and returns a structured, guidance-focused answer."""
+    # Check if API key is available
+    if not api_key:
+        return "❌ **Configuration Error**: OpenAI API key is not set. Please set the OPENAI_API_KEY environment variable."
+    
     lesson_snippets = extract_relevant_lessons(question)
     prompt = INSTRUCTION_PROMPT
     if lesson_snippets:
         prompt += f"\n\nRelevant lesson content:\n{lesson_snippets}"
 
+    # List of models to try, in order of preference
+    models_to_try = ["gpt-4o-mini", "gpt-3.5-turbo", "gpt-4o"]
+    
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None,
-        lambda: openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": question}
-            ]
-        )
-    )
-    return response.choices[0].message.content
+    
+    for model in models_to_try:
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda m=model: openai.chat.completions.create(
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": question}
+                    ]
+                )
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            # Log the error and try the next model
+            error_msg = str(e)
+            if "does not exist" in error_msg or "not found" in error_msg:
+                continue  # Try next model
+            else:
+                # For other errors (API key, rate limit, etc.), provide helpful message
+                if "api_key" in error_msg.lower():
+                    return "❌ **Configuration Error**: OpenAI API key is not set or invalid. Please ensure the OPENAI_API_KEY environment variable is properly configured."
+                elif "rate_limit" in error_msg.lower():
+                    return "⏳ **Rate Limit**: API rate limit exceeded. Please try again in a moment."
+                elif "quota" in error_msg.lower():
+                    return "💳 **Quota Exceeded**: OpenAI API quota has been exceeded. Please check your account billing."
+                else:
+                    return f"🔧 **API Error**: Unable to process your question due to an API error: {error_msg[:100]}{'...' if len(error_msg) > 100 else ''}"
+    
+    # If all models failed
+    return "❌ **Model Unavailable**: Unable to access any OpenAI models. Please check your API key and account permissions, or try again later."
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
